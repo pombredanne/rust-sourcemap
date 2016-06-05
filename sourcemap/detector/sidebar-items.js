@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["SourceMapRef","Represents a reference to a sourcemap"]],"fn":[["locate_sourcemap_reference","Locates a sourcemap reference"]]});
