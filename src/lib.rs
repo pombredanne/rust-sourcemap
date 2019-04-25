@@ -37,37 +37,35 @@
 //! let token = sm.lookup_token(0, 0).unwrap(); // line-number and column
 //! println!("token: {}", token);
 //! ```
-#[macro_use]
-extern crate serde_derive;
-
-extern crate base64;
-extern crate serde;
-extern crate serde_json;
-extern crate url;
-
 mod macros;
 
-pub use types::{RawToken, Token, TokenIter, SourceMap, SourceMapIndex, SourceMapSection,
-                SourceMapSectionIter, RewriteOptions, DecodedMap};
-pub use builder::SourceMapBuilder;
-pub use errors::{Result, Error};
-pub use decoder::{decode, decode_slice, decode_data_url};
-pub use detector::{SourceMapRef, locate_sourcemap_reference, locate_sourcemap_reference_slice,
-                   is_sourcemap, is_sourcemap_slice};
-pub use utils::make_relative_path;
+pub use crate::builder::SourceMapBuilder;
+pub use crate::decoder::{decode, decode_data_url, decode_slice};
+pub use crate::detector::{
+    is_sourcemap, is_sourcemap_slice, locate_sourcemap_reference, locate_sourcemap_reference_slice,
+    SourceMapRef,
+};
+pub use crate::errors::{Error, Result};
+pub use crate::sourceview::SourceView;
+pub use crate::types::{
+    DecodedMap, RawToken, RewriteOptions, SourceMap, SourceMapIndex, SourceMapSection,
+    SourceMapSectionIter, Token, TokenIter,
+};
+pub use crate::utils::make_relative_path;
 
 mod builder;
-mod errors;
-mod types;
-mod jsontypes;
 mod decoder;
-mod encoder;
 mod detector;
-mod vlq;
+mod encoder;
+mod errors;
+mod jsontypes;
+mod sourceview;
+mod types;
 mod utils;
+mod vlq;
 
 #[doc(hidden)]
 pub mod internals {
     pub use super::decoder::StripHeaderReader;
-    pub use vlq::{parse_vlq_segment, generate_vlq_segment};
+    pub use crate::vlq::{generate_vlq_segment, parse_vlq_segment};
 }

@@ -1,7 +1,5 @@
-extern crate sourcemap;
-
-use std::collections::HashMap;
 use sourcemap::SourceMapIndex;
+use std::collections::HashMap;
 
 #[test]
 fn test_basic_indexed_sourcemap() {
@@ -54,11 +52,11 @@ fn test_basic_indexed_sourcemap() {
 
     let mut ism = SourceMapIndex::from_reader(input).unwrap();
     for section_id in 0..ism.get_section_count() {
-        let mut section = ism.get_section_mut(section_id).unwrap();
-        let mut map = section.get_sourcemap_mut().unwrap();
+        let section = ism.get_section_mut(section_id).unwrap();
+        let map = section.get_sourcemap_mut().unwrap();
         let contents = {
             let filename = map.get_source(0).unwrap();
-            *raw_files.get(filename).unwrap()
+            raw_files[filename]
         };
         map.set_source_contents(0, Some(contents));
     }
@@ -69,7 +67,7 @@ fn test_basic_indexed_sourcemap() {
     println!("{}", String::from_utf8(out).unwrap());
 
     for token in flat_map.tokens() {
-        let src = files.get(token.get_source().unwrap()).unwrap();
+        let src = &files[token.get_source().unwrap()];
         if let Some(name) = token.get_name() {
             let line = src[token.get_src_line() as usize];
             let idx = token.get_src_col() as usize;
@@ -79,11 +77,17 @@ fn test_basic_indexed_sourcemap() {
     }
 
     for (src_id, filename) in flat_map.sources().enumerate() {
-        let ref_contents = files.get(filename).unwrap();
-        let contents: Vec<_> = flat_map.get_source_contents(src_id as u32)
-            .expect(&format!("no source for {}", filename))
+        let ref_contents = &files[filename];
+        let contents: Vec<_> = flat_map
+            .get_source_contents(src_id as u32)
+            .unwrap_or_else(|| panic!("no source for {}", filename))
             .lines()
             .collect();
         assert_eq!(&contents, ref_contents);
+
+        let view = flat_map
+            .get_source_view(src_id as u32)
+            .unwrap_or_else(|| panic!("no source for {}", filename));
+        assert_eq!(&view.lines().collect::<Vec<_>>(), ref_contents);
     }
 }

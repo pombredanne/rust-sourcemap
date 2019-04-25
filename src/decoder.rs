@@ -1,16 +1,16 @@
 use std::io;
-use std::io::{Read, BufReader};
+use std::io::{BufReader, Read};
 
 use base64;
 use serde_json;
 use serde_json::Value;
 
-use jsontypes::RawSourceMap;
-use types::{RawToken, SourceMap, SourceMapIndex, SourceMapSection, DecodedMap};
-use errors::{Result, Error};
-use vlq::parse_vlq_segment;
+use crate::errors::{Error, Result};
+use crate::jsontypes::RawSourceMap;
+use crate::types::{DecodedMap, RawToken, SourceMap, SourceMapIndex, SourceMapSection};
+use crate::vlq::parse_vlq_segment;
 
-const DATA_PREABLE: &'static str = "data:application/json;base64,";
+const DATA_PREABLE: &str = "data:application/json;base64,";
 
 #[derive(PartialEq)]
 enum HeaderState {
@@ -19,7 +19,6 @@ enum HeaderState {
     AwaitingNewline,
     PastHeader,
 }
-
 
 pub struct StripHeaderReader<R: Read> {
     r: R,
@@ -52,7 +51,7 @@ impl<R: Read> Read for StripHeaderReader<R> {
 impl<R: Read> StripHeaderReader<R> {
     fn strip_head_read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut backing = vec![0; buf.len()];
-        let mut local_buf: &mut [u8] = &mut *backing;
+        let local_buf: &mut [u8] = &mut *backing;
 
         loop {
             let read = self.r.read(local_buf)?;
@@ -83,7 +82,10 @@ impl<R: Read> StripHeaderReader<R> {
                         if byte == b'\n' {
                             HeaderState::PastHeader
                         } else {
-                            fail!(io::Error::new(io::ErrorKind::InvalidData, "expected newline"));
+                            fail!(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "expected newline"
+                            ));
                         }
                     }
                     HeaderState::PastHeader => {
@@ -97,15 +99,17 @@ impl<R: Read> StripHeaderReader<R> {
     }
 }
 
-
 pub fn strip_junk_header(slice: &[u8]) -> io::Result<&[u8]> {
-    if slice.len() == 0 || !is_junk_json(slice[0]) {
+    if slice.is_empty() || !is_junk_json(slice[0]) {
         return Ok(slice);
     }
     let mut need_newline = false;
     for (idx, &byte) in slice.iter().enumerate() {
         if need_newline && byte != b'\n' {
-            fail!(io::Error::new(io::ErrorKind::InvalidData, "expected newline"));
+            fail!(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected newline"
+            ));
         } else if is_junk_json(byte) {
             continue;
         } else if byte == b'\r' {
@@ -124,22 +128,26 @@ fn decode_regular(rsm: RawSourceMap) -> Result<SourceMap> {
     let mut src_col = 0;
     let mut name_id = 0;
 
-    let names = rsm.names.unwrap_or(vec![]);
-    let mut sources = rsm.sources.unwrap_or_else(|| vec![]);
+    let names = rsm.names.unwrap_or_default();
+    let sources = rsm.sources.unwrap_or_else(|| vec![]);
     let mappings = rsm.mappings.unwrap_or_else(|| "".into());
     let allocation_size = mappings.matches(&[',', ';'][..]).count() + 10;
     let mut tokens = Vec::with_capacity(allocation_size);
 
     for (dst_line, line) in mappings.split(';').enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+
         dst_col = 0;
 
         for segment in line.split(',') {
-            if segment.len() == 0 {
+            if segment.is_empty() {
                 continue;
             }
 
             let nums = parse_vlq_segment(segment)?;
-            dst_col = (dst_col as i64 + nums[0]) as u32;
+            dst_col = (i64::from(dst_col) + nums[0]) as u32;
 
             let mut src = !0;
             let mut name = !0;
@@ -148,17 +156,17 @@ fn decode_regular(rsm: RawSourceMap) -> Result<SourceMap> {
                 if nums.len() != 4 && nums.len() != 5 {
                     fail!(Error::BadSegmentSize(nums.len() as u32));
                 }
-                src_id = (src_id as i64 + nums[1]) as u32;
+                src_id = (i64::from(src_id) + nums[1]) as u32;
                 if src_id >= sources.len() as u32 {
                     fail!(Error::BadSourceReference(src_id));
                 }
 
                 src = src_id;
-                src_line = (src_line as i64 + nums[2]) as u32;
-                src_col = (src_col as i64 + nums[3]) as u32;
+                src_line = (i64::from(src_line) + nums[2]) as u32;
+                src_col = (i64::from(src_col) + nums[3]) as u32;
 
                 if nums.len() > 4 {
-                    name_id = (name_id as i64 + nums[4]) as u32;
+                    name_id = (i64::from(name_id) + nums[4]) as u32;
                     if name_id >= names.len() as u32 {
                         fail!(Error::BadNameReference(name_id));
                     }
@@ -168,74 +176,84 @@ fn decode_regular(rsm: RawSourceMap) -> Result<SourceMap> {
 
             tokens.push(RawToken {
                 dst_line: dst_line as u32,
-                dst_col: dst_col,
-                src_line: src_line,
-                src_col: src_col,
+                dst_col,
+                src_line,
+                src_col,
                 src_id: src,
                 name_id: name,
             });
         }
     }
 
-    if let Some(source_root) = rsm.source_root {
-        if !source_root.is_empty() {
-            let source_root = source_root.trim_right_matches('/');
-            sources = sources.into_iter()
+    let sources = match rsm.source_root {
+        Some(ref source_root) if !source_root.is_empty() => {
+            let source_root = source_root.trim_end_matches('/');
+            sources
+                .into_iter()
                 .map(|x| {
-                    if x.len() > 0 &&
-                       (x.starts_with('/') || x.starts_with("http:") || x.starts_with("https:")) {
+                    let x = x.unwrap_or_default();
+                    let is_valid = !x.is_empty()
+                        && (x.starts_with('/')
+                            || x.starts_with("http:")
+                            || x.starts_with("https:"));
+
+                    if is_valid {
                         x
                     } else {
                         format!("{}/{}", source_root, x)
                     }
                 })
-                .collect();
+                .collect()
         }
-    }
+        _ => sources.into_iter().map(Option::unwrap_or_default).collect(),
+    };
 
     // apparently we can encounter some non string types in real world
     // sourcemaps :(
-    let names = names.into_iter()
-        .map(|val| {
-            match val {
-                Value::String(s) => s,
-                Value::Number(num) => num.to_string(),
-                _ => "".into(),
-            }
+    let names = names
+        .into_iter()
+        .map(|val| match val {
+            Value::String(s) => s,
+            Value::Number(num) => num.to_string(),
+            _ => "".into(),
         })
         .collect::<Vec<String>>();
 
     // file sometimes is not a string for unexplicable reasons
-    let file = rsm.file.map(|val| {
-        match val {
-            Value::String(s) => s,
-            _ => "<invalid>".into(),
-        }
+    let file = rsm.file.map(|val| match val {
+        Value::String(s) => s,
+        _ => "<invalid>".into(),
     });
 
-    Ok(SourceMap::new(file, tokens, names, sources, rsm.sources_content))
+    Ok(SourceMap::new(
+        file,
+        tokens,
+        names,
+        sources,
+        rsm.sources_content,
+    ))
 }
 
 fn decode_index(rsm: RawSourceMap) -> Result<SourceMapIndex> {
     let mut sections = vec![];
 
-    for mut raw_section in rsm.sections.unwrap_or(vec![]) {
-        sections.push(SourceMapSection::new((raw_section.offset.line, raw_section.offset.column),
-                                            raw_section.url,
-                                            match raw_section.map.take() {
-                                                Some(map) => Some(decode_regular(*map)?),
-                                                None => None,
-                                            }));
+    for mut raw_section in rsm.sections.unwrap_or_default() {
+        sections.push(SourceMapSection::new(
+            (raw_section.offset.line, raw_section.offset.column),
+            raw_section.url,
+            match raw_section.map.take() {
+                Some(map) => Some(decode_regular(*map)?),
+                None => None,
+            },
+        ));
     }
 
-    sections.sort_by_key(|sect| sect.get_offset());
+    sections.sort_by_key(SourceMapSection::get_offset);
 
     // file sometimes is not a string for unexplicable reasons
-    let file = rsm.file.map(|val| {
-        match val {
-            Value::String(s) => s,
-            _ => "<invalid>".into(),
-        }
+    let file = rsm.file.map(|val| match val {
+        Value::String(s) => s,
+        _ => "<invalid>".into(),
     });
 
     Ok(SourceMapIndex::new(file, sections))

@@ -1,12 +1,9 @@
-extern crate sourcemap;
-
 use std::env;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 
 use sourcemap::{decode, DecodedMap, RewriteOptions, SourceMap};
-
 
 fn test(sm: &SourceMap) {
     for (src_id, source) in sm.sources().enumerate() {
@@ -27,13 +24,12 @@ fn test(sm: &SourceMap) {
 fn load_from_reader<R: Read>(mut rdr: R) -> SourceMap {
     match decode(&mut rdr).unwrap() {
         DecodedMap::Regular(sm) => sm,
-        DecodedMap::Index(idx) => {
-            idx.flatten_and_rewrite(&RewriteOptions {
-                    load_local_source_contents: true,
-                    ..Default::default()
-                })
-                .unwrap()
-        }
+        DecodedMap::Index(idx) => idx
+            .flatten_and_rewrite(&RewriteOptions {
+                load_local_source_contents: true,
+                ..Default::default()
+            })
+            .unwrap(),
     }
 }
 

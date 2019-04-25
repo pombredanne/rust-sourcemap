@@ -1,9 +1,9 @@
 use std;
-use std::str;
-use std::io;
-use std::fmt;
-use std::string;
 use std::error;
+use std::fmt;
+use std::io;
+use std::str;
+use std::string;
 
 use serde_json;
 
@@ -43,7 +43,6 @@ pub enum Error {
     CannotFlatten(String),
 }
 
-
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::Io(err)
@@ -70,7 +69,7 @@ impl From<serde_json::Error> for Error {
 
 impl error::Error for Error {
     fn description(&self) -> &str {
-        use Error::*;
+        use crate::Error::*;
         match *self {
             Io(ref err) => err.description(),
             Utf8(ref err) => err.description(),
@@ -88,8 +87,8 @@ impl error::Error for Error {
         }
     }
 
-    fn cause(&self) -> Option<&error::Error> {
-        use Error::*;
+    fn cause(&self) -> Option<&dyn error::Error> {
+        use crate::Error::*;
         match *self {
             Io(ref err) => Some(&*err),
             Utf8(ref err) => Some(&*err),
@@ -99,8 +98,8 @@ impl error::Error for Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::Error::*;
         match *self {
             Io(ref msg) => write!(f, "{}", msg),
             Utf8(ref msg) => write!(f, "{}", msg),
@@ -112,10 +111,10 @@ impl fmt::Display for Error {
             BadSourceReference(id) => write!(f, "bad reference to source #{}", id),
             BadNameReference(id) => write!(f, "bad reference to name #{}", id),
             IndexedSourcemap => write!(f, "encountered unexpected indexed sourcemap"),
-            RegularSourcemap => {
-                write!(f,
-                       "encountered unexpected sourcemap where index was expected")
-            }
+            RegularSourcemap => write!(
+                f,
+                "encountered unexpected sourcemap where index was expected"
+            ),
             InvalidDataUrl => write!(f, "the provided data URL is invalid"),
             CannotFlatten(ref msg) => write!(f, "cannot flatten the indexed sourcemap: {}", msg),
         }

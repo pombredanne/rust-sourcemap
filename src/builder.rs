@@ -1,15 +1,14 @@
+use std::collections::HashMap;
+use std::convert::AsRef;
 use std::env;
 use std::fs;
-use std::convert::AsRef;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 
 use url::Url;
 
-use errors::Result;
-use types::{SourceMap, RawToken, Token};
-
+use crate::errors::Result;
+use crate::types::{RawToken, SourceMap, Token};
 
 /// Helper for sourcemap generation
 ///
@@ -46,7 +45,7 @@ impl SourceMapBuilder {
     /// Creates a new source map builder and sets the file.
     pub fn new(file: Option<&str>) -> SourceMapBuilder {
         SourceMapBuilder {
-            file: file.map(|x| x.to_string()),
+            file: file.map(str::to_owned),
             name_map: HashMap::new(),
             names: vec![],
             tokens: vec![],
@@ -58,7 +57,7 @@ impl SourceMapBuilder {
 
     /// Sets the file for the sourcemap (optional)
     pub fn set_file(&mut self, value: Option<&str>) {
-        self.file = value.map(|x| x.to_string());
+        self.file = value.map(str::to_owned);
     }
 
     /// Returns the currently set file.
@@ -78,6 +77,7 @@ impl SourceMapBuilder {
 
     /// Changes the source name for an already set source.
     pub fn set_source(&mut self, src_id: u32, src: &str) {
+        assert!(src_id != !0, "Cannot set sources for tombstone source id");
         self.sources[src_id as usize] = src.to_string();
     }
 
@@ -88,15 +88,18 @@ impl SourceMapBuilder {
 
     /// Sets the source contents for an already existing source.
     pub fn set_source_contents(&mut self, src_id: u32, contents: Option<&str>) {
+        assert!(src_id != !0, "Cannot set sources for tombstone source id");
         if self.sources.len() > self.source_contents.len() {
             self.source_contents.resize(self.sources.len(), None);
         }
-        self.source_contents[src_id as usize] = contents.map(|x| x.to_string());
+        self.source_contents[src_id as usize] = contents.map(str::to_owned);
     }
 
     /// Returns the current source contents for a source.
     pub fn get_source_contents(&self, src_id: u32) -> Option<&str> {
-        self.source_contents.get(src_id as usize).and_then(|x| x.as_ref().map(|x| &x[..]))
+        self.source_contents
+            .get(src_id as usize)
+            .and_then(|x| x.as_ref().map(|x| &x[..]))
     }
 
     /// Checks if a given source ID has source contents available.
@@ -125,10 +128,12 @@ impl SourceMapBuilder {
 
         let rv = to_read.len();
         for (src_id, path) in to_read {
-            let mut f = fs::File::open(&path)?;
-            let mut contents = String::new();
-            f.read_to_string(&mut contents)?;
-            self.set_source_contents(src_id, Some(&contents));
+            if let Ok(mut f) = fs::File::open(&path) {
+                let mut contents = String::new();
+                if f.read_to_string(&mut contents).is_ok() {
+                    self.set_source_contents(src_id, Some(&contents));
+                }
+            }
         }
 
         Ok(rv)
@@ -145,14 +150,15 @@ impl SourceMapBuilder {
     }
 
     /// Adds a new mapping to the builder.
-    pub fn add(&mut self,
-               dst_line: u32,
-               dst_col: u32,
-               src_line: u32,
-               src_col: u32,
-               source: Option<&str>,
-               name: Option<&str>)
-               -> RawToken {
+    pub fn add(
+        &mut self,
+        dst_line: u32,
+        dst_col: u32,
+        src_line: u32,
+        src_col: u32,
+        source: Option<&str>,
+        name: Option<&str>,
+    ) -> RawToken {
         let src_id = match source {
             Some(source) => self.add_source(source),
             None => !0,
@@ -162,12 +168,12 @@ impl SourceMapBuilder {
             None => !0,
         };
         let raw = RawToken {
-            dst_line: dst_line,
-            dst_col: dst_col,
-            src_line: src_line,
-            src_col: src_col,
-            src_id: src_id,
-            name_id: name_id,
+            dst_line,
+            dst_col,
+            src_line,
+            src_col,
+            src_id,
+            name_id,
         };
         self.tokens.push(raw);
         raw
@@ -175,14 +181,16 @@ impl SourceMapBuilder {
 
     /// Shortcut for adding a new mapping based of an already existing token,
     /// optionally removing the name.
-    pub fn add_token(&mut self, token: &Token, with_name: bool) -> RawToken {
+    pub fn add_token(&mut self, token: &Token<'_>, with_name: bool) -> RawToken {
         let name = if with_name { token.get_name() } else { None };
-        self.add(token.get_dst_line(),
-                 token.get_dst_col(),
-                 token.get_src_line(),
-                 token.get_src_col(),
-                 token.get_source(),
-                 name)
+        self.add(
+            token.get_dst_line(),
+            token.get_dst_col(),
+            token.get_src_line(),
+            token.get_src_col(),
+            token.get_source(),
+            name,
+        )
     }
 
     /// Strips common prefixes from the sources in the builder
@@ -203,7 +211,7 @@ impl SourceMapBuilder {
 
     /// Converts the builder into a sourcemap.
     pub fn into_sourcemap(self) -> SourceMap {
-        let contents = if self.source_contents.len() > 0 {
+        let contents = if !self.source_contents.is_empty() {
             Some(self.source_contents)
         } else {
             None
